@@ -5,51 +5,107 @@ import PyPDF2 as pdf
 from dotenv import load_dotenv
 import json
 
-load_dotenv() ## load all our environment variables
-
+# Load environment variables
+load_dotenv()
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# Gemini Pro Response
-def get_gemini_repsonse(input):
-    model=genai.GenerativeModel('gemini-pro')
-    response=model.generate_content(input)
-    return response.text
+# Function to get response from Gemini Pro
+def get_gemini_response(input_text):
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(input_text)
+        return response.text
+    except Exception as e:
+        return f"Error generating response: {str(e)}"
 
-def input_pdf_text(uploaded_file): 
-    reader=pdf.PdfReader(uploaded_file)
-    text=""
-    for page in range(len(reader.pages)):
-        page=reader.pages[page]
-        text+=str(page.extract_text())
-    return text
+# Function to extract text from PDF
+def input_pdf_text(uploaded_file):
+    try:
+        reader = pdf.PdfReader(uploaded_file)
+        text = ""
+        for page_num in range(len(reader.pages)):
+            page = reader.pages[page_num]
+            extracted_text = page.extract_text()
+            if extracted_text:
+                text += extracted_text
+        return text
+    except Exception as e:
+        return f"Error extracting PDF text: {str(e)}"
 
-#Prompt Template
+# Prompt Template
+input_prompt = """
+Hey, act like a skilled Application Tracking System (ATS) with deep expertise in tech fields, including software engineering, data science, data analysis, and big data engineering. Your task is to evaluate the resume based on the provided job description. Consider a highly competitive job market and provide actionable insights to improve the resume. Assign a percentage match based on the job description and identify missing keywords with high accuracy.
 
-input_prompt="""
-Hey Act Like a skilled or very experience ATS(Application Tracking System)
-with a deep understanding of tech field,software engineering,data science ,data analyst
-and big data engineer. Your task is to evaluate the resume based on the given job description.
-You must consider the job market is very competitive and you should provide 
-best assistance for improving the resumes. Assign the percentage Matching based 
-on Jd and
-the missing keywords with high accuracy
-resume:{text}
-description:{jd}
+resume: {text}
+description: {jd}
 
-I want the response in one single string having the structure
-{{"JD Match":"%","MissingKeywords:[]","Profile Summary":""}}
+Return the response as a JSON string with the following structure:
+{{"JD Match":"%","MissingKeywords":[],"Profile Summary":""}}
 """
 
-## streamlit app
-st.title("Smart ATS")
-st.text("Improve Your Resume ATS")
-jd=st.text_area("Paste the Job Description")
-uploaded_file=st.file_uploader("Upload Your Resume",type="pdf",help="Please uplaod the pdf")
+# Streamlit App
+st.set_page_config(page_title="Smart ATS", page_icon="📄", layout="wide")
+st.title("Smart ATS - Resume Evaluator")
+st.markdown("Optimize your resume for ATS and increase your chances in a competitive job market!")
 
-submit = st.button("Submit")
+# Input fields
+st.subheader("Job Description")
+jd = st.text_area("Paste the Job Description here", height=200, placeholder="Enter the job description...")
 
+st.subheader("Upload Resume")
+uploaded_file = st.file_uploader("Upload Your Resume (PDF only)", type="pdf", help="Please upload a PDF file of your resume.")
+
+# Submit button
+submit = st.button("Evaluate Resume", type="primary")
+
+# Handle submission
 if submit:
-    if uploaded_file is not None:
-        text=input_pdf_text(uploaded_file)
-        response=get_gemini_repsonse(input_prompt)
-        st.subheader(response)
+    if uploaded_file is not None and jd:
+        with st.spinner("Analyzing resume..."):
+            # Extract text from PDF
+            resume_text = input_pdf_text(uploaded_file)
+            if resume_text.startswith("Error"):
+                st.error(resume_text)
+            else:
+                # Format the prompt with resume text and job description
+                formatted_prompt = input_prompt.format(text=resume_text, jd=jd)
+                
+                # Get response from Gemini
+                response = get_gemini_response(formatted_prompt)
+                
+                if response.startswith("Error"):
+                    st.error(response)
+                else:
+                    try:
+                        # Parse the JSON response
+                        response_json = json.loads(response)
+                        
+                        # Display results
+                        st.subheader("Resume Analysis Results")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.metric("JD Match", f"{response_json.get('JD Match', 'N/A')}")
+                        
+                        with col2:
+                            st.write("**Missing Keywords**")
+                            missing_keywords = response_json.get('MissingKeywords', [])
+                            if missing_keywords:
+                                st.write(", ".join(missing_keywords))
+                            else:
+                                st.write("None")
+                        
+                        st.write("**Profile Summary**")
+                        st.write(response_json.get('Profile Summary', 'No summary provided.'))
+                        
+                    except json.JSONDecodeError:
+                        st.error("Error parsing response from model. Please try again.")
+                    except Exception as e:
+                        st.error(f"An unexpected error occurred: {str(e)}")
+    else:
+        st.warning("Please upload a resume and provide a job description before submitting.")
+
+# Footer
+st.markdown("---")
+st.markdown("Built with ❤️ using Streamlit and Google Gemini | © 2025 Smart ATS")
